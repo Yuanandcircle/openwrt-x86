@@ -1,0 +1,46 @@
+name: Build OpenWrt-x86
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Initialize variables
+        id: init_variables
+        run: |
+          echo "target=$(cat config.json | jq -r '.target')" >> $GITHUB_OUTPUT
+          echo "subtarget=$(cat config.json | jq -r '.subtarget')" >> $GITHUB_OUTPUT
+          echo "version=$(cat config.json | jq -r '.version')" >> $GITHUB_OUTPUT
+          echo "profile=$(cat config.json | jq -r '.profile')" >> $GITHUB_OUTPUT
+          echo "rootfs_partsize=$(cat config.json | jq -r '.rootfs_partsize')" >> $GITHUB_OUTPUT
+          echo "packages=$(cat config.json | jq -r '.packages | sort | reverse | .[]' | tr '\n' ' ')" >> $GITHUB_OUTPUT
+      - name: Build
+        env:
+          TARGET: ${{ steps.init_variables.outputs.target }}
+          SUBTARGET: ${{ steps.init_variables.outputs.subtarget }}
+          VERSION: ${{ steps.init_variables.outputs.version }}
+          PROFILE: ${{ steps.init_variables.outputs.profile }}
+          ROOTFS_PARTSIZE: ${{ steps.init_variables.outputs.rootfs_partsize }}
+          PACKAGES: ${{ steps.init_variables.outputs.packages }}
+        run: |
+          sudo install -d -m 0755 -o 1000 -g 1000 bin
+          sudo podman run --rm -v $(pwd)/bin:/builder/bin ghcr.io/openwrt/imagebuilder:${{ env.TARGET }}-${{ env.SUBTARGET }}-${{ env.VERSION }} \
+            make image PROFILE=${{ env.PROFILE }} ROOTFS_PARTSIZE=${{ env.ROOTFS_PARTSIZE }} PACKAGES="${{ env.PACKAGES }}"
+      - name: Upload binaries to release
+        uses: svenstaro/upload-release-action@v2
+        if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+        env:
+          TARGET: ${{ steps.init_variables.outputs.target }}
+          SUBTARGET: ${{ steps.init_variables.outputs.subtarget }}
+          VERSION: ${{ steps.init_variables.outputs.version }}
+        with:
+          file_glob: true
+          file: bin/targets/${{ env.TARGET }}/${{ env.SUBTARGET }}/*
+          draft: true
+          release_name: openwrt-${{ env.TARGET }}-${{ env.SUBTARGET }}-${{ env.VERSION }}
